@@ -174,10 +174,6 @@ export default defineConfig({
 				process.env.NEXT_PUBLIC_ELECTRIC_URL,
 				"https://electric-proxy.avi-6ac.workers.dev",
 			),
-			"process.env.NEXT_PUBLIC_ELECTRIC_PROXY_URL": defineEnv(
-				process.env.NEXT_PUBLIC_ELECTRIC_PROXY_URL,
-				"https://api.superset.sh/api/electric",
-			),
 			"process.env.NEXT_PUBLIC_DOCS_URL": defineEnv(
 				process.env.NEXT_PUBLIC_DOCS_URL,
 				"https://docs.superset.sh",
@@ -239,10 +235,6 @@ export default defineConfig({
 
 		worker: {
 			format: "es",
-		},
-
-		optimizeDeps: {
-			include: ["monaco-editor"],
 		},
 
 		publicDir: resolve(resources, "public"),

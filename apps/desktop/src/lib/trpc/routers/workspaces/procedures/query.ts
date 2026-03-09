@@ -1,15 +1,22 @@
-import { projects, workspaces, worktrees } from "@superset/local-db";
+import {
+	projects,
+	workspaceSections,
+	workspaces,
+	worktrees,
+} from "@superset/local-db";
 import { TRPCError } from "@trpc/server";
 import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { localDb } from "main/lib/local-db";
 import { z } from "zod";
 import { publicProcedure, router } from "../../..";
 import { getWorkspace } from "../utils/db-helpers";
+import { getProjectChildItems } from "../utils/project-children-order";
+import { computeVisualOrder } from "../utils/visual-order";
 import { getWorkspacePath } from "../utils/worktree";
 
 type WorktreePathMap = Map<string, string>;
 
-/** Returns workspace IDs in sidebar visual order (by project.tabOrder, then workspace.tabOrder). */
+/** Returns workspace IDs in sidebar visual order (by project.tabOrder, then ungrouped workspaces, then sections by tabOrder). */
 function getWorkspacesInVisualOrder(): string[] {
 	const activeProjects = localDb
 		.select()
@@ -32,17 +39,14 @@ function getWorkspacesInVisualOrder(): string[] {
 		.where(isNull(workspaces.deletingAt))
 		.all();
 
-	const orderedIds: string[] = [];
-	for (const project of activeProjects) {
-		// Parent's own workspaces
-		const projectWorkspaces = allWorkspaces
-			.filter((w) => w.projectId === project.id)
-			.sort((a, b) => a.tabOrder - b.tabOrder);
-		for (const ws of projectWorkspaces) {
-			orderedIds.push(ws.id);
-		}
+	const allSections = localDb.select().from(workspaceSections).all();
 
-		// Child project workspaces
+	// Get base visual order from upstream's computeVisualOrder
+	const baseOrder = computeVisualOrder(activeProjects, allWorkspaces, allSections);
+
+	// Append child project workspaces
+	const childProjectIds: string[] = [];
+	for (const project of activeProjects) {
 		const children = childProjects.filter(
 			(c) => c.parentProjectId === project.id,
 		);
@@ -51,12 +55,12 @@ function getWorkspacesInVisualOrder(): string[] {
 				.filter((w) => w.projectId === child.id)
 				.sort((a, b) => a.tabOrder - b.tabOrder);
 			for (const ws of childWorkspaces) {
-				orderedIds.push(ws.id);
+				childProjectIds.push(ws.id);
 			}
 		}
 	}
 
-	return orderedIds;
+	return [...baseOrder, ...childProjectIds];
 }
 
 export const createQueryProcedures = () => {
@@ -118,6 +122,52 @@ export const createQueryProcedures = () => {
 		}),
 
 		getAllGrouped: publicProcedure.query(() => {
+			type WorkspaceItem = {
+				id: string;
+				projectId: string;
+				sectionId: string | null;
+				worktreeId: string | null;
+				worktreePath: string;
+				type: "worktree" | "branch";
+				branch: string;
+				name: string;
+				tabOrder: number;
+				createdAt: number;
+				updatedAt: number;
+				lastOpenedAt: number;
+				isUnread: boolean;
+				isUnnamed: boolean;
+			};
+
+			type SectionItem = {
+				id: string;
+				projectId: string;
+				name: string;
+				tabOrder: number;
+				isCollapsed: boolean;
+				color: string | null;
+				workspaces: WorkspaceItem[];
+			};
+
+			type TopLevelItem = {
+				id: string;
+				kind: "workspace" | "section";
+				tabOrder: number;
+			};
+
+			type ChildProject = {
+				project: {
+					id: string;
+					name: string;
+					color: string;
+					githubOwner: string | null;
+					mainRepoPath: string;
+					hideImage: boolean;
+					iconUrl: string | null;
+				};
+				workspaces: WorkspaceItem[];
+			};
+
 			// Top-level active projects only (exclude children)
 			const activeProjects = localDb
 				.select()
@@ -142,34 +192,7 @@ export const createQueryProcedures = () => {
 				allWorktrees.map((wt) => [wt.id, wt.path]),
 			);
 
-			type WorkspaceEntry = {
-				id: string;
-				projectId: string;
-				worktreeId: string | null;
-				worktreePath: string;
-				type: "worktree" | "branch";
-				branch: string;
-				name: string;
-				tabOrder: number;
-				createdAt: number;
-				updatedAt: number;
-				lastOpenedAt: number;
-				isUnread: boolean;
-				isUnnamed: boolean;
-			};
-
-			type ChildProject = {
-				project: {
-					id: string;
-					name: string;
-					color: string;
-					githubOwner: string | null;
-					mainRepoPath: string;
-					hideImage: boolean;
-					iconUrl: string | null;
-				};
-				workspaces: WorkspaceEntry[];
-			};
+			const allSections = localDb.select().from(workspaceSections).all();
 
 			const groupsMap = new Map<
 				string,
@@ -184,12 +207,27 @@ export const createQueryProcedures = () => {
 						hideImage: boolean;
 						iconUrl: string | null;
 					};
-					workspaces: WorkspaceEntry[];
+					workspaces: WorkspaceItem[];
+					sections: SectionItem[];
+					topLevelItems: TopLevelItem[];
 					childProjects: ChildProject[];
 				}
 			>();
 
 			for (const project of activeProjects) {
+				const projectSections = allSections
+					.filter((s) => s.projectId === project.id)
+					.sort((a, b) => a.tabOrder - b.tabOrder)
+					.map((s) => ({
+						id: s.id,
+						projectId: s.projectId,
+						name: s.name,
+						tabOrder: s.tabOrder,
+						isCollapsed: s.isCollapsed ?? false,
+						color: s.color ?? null,
+						workspaces: [] as WorkspaceItem[],
+					}));
+
 				groupsMap.set(project.id, {
 					project: {
 						id: project.id,
@@ -203,6 +241,8 @@ export const createQueryProcedures = () => {
 						iconUrl: project.iconUrl ?? null,
 					},
 					workspaces: [],
+					sections: projectSections,
+					topLevelItems: [],
 					childProjects: [],
 				});
 			}
@@ -257,29 +297,75 @@ export const createQueryProcedures = () => {
 				// Then try child project
 				const childProject = childProjectById.get(workspace.projectId);
 
-				const targetProject = group || childProject;
-				if (!targetProject) continue;
+				if (group) {
+					let worktreePath = "";
+					if (workspace.type === "worktree" && workspace.worktreeId) {
+						worktreePath = worktreePathMap.get(workspace.worktreeId) ?? "";
+					} else if (workspace.type === "branch") {
+						worktreePath = group.project.mainRepoPath;
+					}
 
-				let worktreePath = "";
-				if (workspace.type === "worktree" && workspace.worktreeId) {
-					worktreePath =
-						worktreePathMap.get(workspace.worktreeId) ?? "";
-				} else if (workspace.type === "branch") {
-					worktreePath = targetProject.project.mainRepoPath;
+					const item: WorkspaceItem = {
+						...workspace,
+						sectionId: workspace.sectionId ?? null,
+						type: workspace.type as "worktree" | "branch",
+						worktreePath,
+						isUnread: workspace.isUnread ?? false,
+						isUnnamed: workspace.isUnnamed ?? false,
+					};
+
+					if (workspace.sectionId) {
+						const section = group.sections.find(
+							(s) => s.id === workspace.sectionId,
+						);
+						if (section) {
+							section.workspaces.push(item);
+						} else {
+							group.workspaces.push(item);
+						}
+					} else {
+						group.workspaces.push(item);
+					}
+				} else if (childProject) {
+					let worktreePath = "";
+					if (workspace.type === "worktree" && workspace.worktreeId) {
+						worktreePath = worktreePathMap.get(workspace.worktreeId) ?? "";
+					} else if (workspace.type === "branch") {
+						worktreePath = childProject.project.mainRepoPath;
+					}
+
+					childProject.workspaces.push({
+						...workspace,
+						sectionId: workspace.sectionId ?? null,
+						type: workspace.type as "worktree" | "branch",
+						worktreePath,
+						isUnread: workspace.isUnread ?? false,
+						isUnnamed: workspace.isUnnamed ?? false,
+					});
 				}
-
-				targetProject.workspaces.push({
-					...workspace,
-					type: workspace.type as "worktree" | "branch",
-					worktreePath,
-					isUnread: workspace.isUnread ?? false,
-					isUnnamed: workspace.isUnnamed ?? false,
-				});
 			}
 
-			return Array.from(groupsMap.values()).sort(
-				(a, b) => a.project.tabOrder - b.project.tabOrder,
-			);
+			return Array.from(groupsMap.values())
+				.map((group) => {
+					const projectWorkspaces = [
+						...group.workspaces,
+						...group.sections.flatMap((section) => section.workspaces),
+					];
+
+					return {
+						...group,
+						topLevelItems: getProjectChildItems(
+							group.project.id,
+							projectWorkspaces,
+							group.sections,
+						).map((item) => ({
+							id: item.id,
+							kind: item.kind,
+							tabOrder: item.tabOrder,
+						})),
+					};
+				})
+				.sort((a, b) => a.project.tabOrder - b.project.tabOrder);
 		}),
 
 		getPreviousWorkspace: publicProcedure

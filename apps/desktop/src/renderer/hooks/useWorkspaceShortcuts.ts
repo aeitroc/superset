@@ -15,11 +15,28 @@ export function useWorkspaceShortcuts() {
 		electronTrpc.workspaces.getAllGrouped.useQuery();
 	const navigate = useNavigate();
 
-	// Flatten workspaces for keyboard navigation (including child project workspaces)
-	const allWorkspaces = groups.flatMap((group) => [
-		...group.workspaces,
-		...(group.childProjects ?? []).flatMap((child) => child.workspaces),
-	]);
+	// Flatten workspaces for keyboard navigation (including sections and child project workspaces)
+	const allWorkspaces = groups.flatMap((group) => {
+		const topLevelWorkspacesById = new Map(
+			group.workspaces.map((workspace) => [workspace.id, workspace]),
+		);
+		const sectionsById = new Map(
+			(group.sections ?? []).map((section) => [section.id, section]),
+		);
+
+		const mainWorkspaces = (group.topLevelItems ?? []).flatMap((item) => {
+			if (item.kind === "workspace") {
+				const workspace = topLevelWorkspacesById.get(item.id);
+				return workspace ? [workspace] : [];
+			}
+
+			return sectionsById.get(item.id)?.workspaces ?? [];
+		});
+
+		const childWorkspaces = (group.childProjects ?? []).flatMap((child) => child.workspaces);
+
+		return [...mainWorkspaces, ...childWorkspaces];
+	});
 
 	const switchToWorkspace = useCallback(
 		(index: number) => {

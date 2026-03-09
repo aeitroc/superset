@@ -1,15 +1,15 @@
-import type * as Monaco from "monaco-editor";
 import { type MutableRefObject, useCallback, useRef } from "react";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { useTabsStore } from "renderer/stores/tabs/store";
 import type { ChangeCategory } from "shared/changes-types";
+import type { CodeEditorAdapter } from "../../../../../components";
 
 interface UseFileSaveParams {
 	worktreePath: string;
 	filePath: string;
 	paneId: string;
 	diffCategory?: ChangeCategory;
-	editorRef: MutableRefObject<Monaco.editor.IStandaloneCodeEditor | null>;
+	editorRef: MutableRefObject<CodeEditorAdapter | null>;
 	originalContentRef: MutableRefObject<string>;
 	originalDiffContentRef: MutableRefObject<string>;
 	draftContentRef: MutableRefObject<string | null>;
@@ -28,25 +28,35 @@ export function useFileSave({
 	setIsDirty,
 }: UseFileSaveParams) {
 	const savingFromRawRef = useRef(false);
-	const savingDiffContentRef = useRef<string | null>(null);
 	const utils = electronTrpc.useUtils();
 
 	const saveFileMutation = electronTrpc.changes.saveFile.useMutation({
-		onSuccess: () => {
-			setIsDirty(false);
-			if (editorRef.current) {
-				originalContentRef.current = editorRef.current.getValue();
-			}
-			if (savingDiffContentRef.current !== null) {
-				originalDiffContentRef.current = savingDiffContentRef.current;
-				savingDiffContentRef.current = null;
-			}
-			if (savingFromRawRef.current) {
+		onSuccess: (_data, variables) => {
+			const savedContent = variables.content;
+			const currentEditorValue = editorRef.current?.getValue() ?? savedContent;
+			const hasUnsavedChanges = currentEditorValue !== savedContent;
+
+			utils.changes.readWorkingFile.setData(
+				{ worktreePath: variables.worktreePath, filePath: variables.filePath },
+				{
+					ok: true,
+					content: savedContent,
+					truncated: false,
+					byteLength: new TextEncoder().encode(savedContent).length,
+				},
+			);
+
+			originalContentRef.current = savedContent;
+			setIsDirty(hasUnsavedChanges);
+			if (savingFromRawRef.current && !hasUnsavedChanges) {
 				draftContentRef.current = null;
+			} else if (hasUnsavedChanges) {
+				draftContentRef.current = currentEditorValue;
 			}
 			savingFromRawRef.current = false;
+			originalDiffContentRef.current = "";
 
-			utils.changes.readWorkingFile.invalidate();
+			void utils.changes.readWorkingFile.invalidate();
 			utils.changes.getFileContents.invalidate();
 			utils.changes.getStatus.invalidate();
 
@@ -73,31 +83,17 @@ export function useFileSave({
 
 	const handleSaveRaw = useCallback(async () => {
 		if (!editorRef.current || !filePath || !worktreePath) return;
+		const content = editorRef.current.getValue();
 		savingFromRawRef.current = true;
 		await saveFileMutation.mutateAsync({
 			worktreePath,
 			filePath,
-			content: editorRef.current.getValue(),
+			content,
 		});
 	}, [worktreePath, filePath, saveFileMutation, editorRef]);
 
-	const handleSaveDiff = useCallback(
-		async (content: string) => {
-			if (!filePath || !worktreePath) return;
-			savingFromRawRef.current = false;
-			savingDiffContentRef.current = content;
-			await saveFileMutation.mutateAsync({
-				worktreePath,
-				filePath,
-				content,
-			});
-		},
-		[worktreePath, filePath, saveFileMutation],
-	);
-
 	return {
 		handleSaveRaw,
-		handleSaveDiff,
 		isSaving: saveFileMutation.isPending,
 	};
 }

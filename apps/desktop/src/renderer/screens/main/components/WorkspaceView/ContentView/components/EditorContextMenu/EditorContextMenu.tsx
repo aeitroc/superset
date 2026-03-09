@@ -13,7 +13,6 @@ import {
 	LuFile,
 	LuLink,
 	LuMousePointerClick,
-	LuReplace,
 	LuScissors,
 	LuSearch,
 } from "react-icons/lu";
@@ -31,7 +30,6 @@ export interface EditorActions {
 	onCopyPath?: () => void;
 	onCopyPathWithLine?: () => void;
 	onFind?: () => void;
-	onChangeAllOccurrences?: () => void;
 }
 
 export type PaneActions = PaneContextMenuActions;
@@ -40,12 +38,14 @@ interface EditorContextMenuProps {
 	children: ReactNode;
 	editorActions: EditorActions;
 	paneActions: PaneActions;
+	leadingItems?: ReactNode;
 }
 
 export function EditorContextMenu({
 	children,
 	editorActions,
 	paneActions,
+	leadingItems,
 }: EditorContextMenuProps) {
 	const { data: platform } = electronTrpc.window.getPlatform.useQuery();
 	const isMac = platform === "darwin";
@@ -59,7 +59,6 @@ export function EditorContextMenu({
 		onCopyPath,
 		onCopyPathWithLine,
 		onFind,
-		onChangeAllOccurrences,
 	} = editorActions;
 	const showCutPaste = !!onCut && !!onPaste;
 
@@ -67,6 +66,13 @@ export function EditorContextMenu({
 		<ContextMenu>
 			<ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
 			<ContextMenuContent>
+				{leadingItems && (
+					<>
+						{leadingItems}
+						<ContextMenuSeparator />
+					</>
+				)}
+
 				{/* Clipboard Actions */}
 				{showCutPaste && (
 					<ContextMenuItem onSelect={onCut}>
@@ -102,15 +108,6 @@ export function EditorContextMenu({
 				)}
 
 				<ContextMenuSeparator />
-
-				{/* Editor Actions */}
-				{onChangeAllOccurrences && (
-					<ContextMenuItem onSelect={onChangeAllOccurrences}>
-						<LuReplace className="size-4" />
-						Change All Occurrences
-						<ContextMenuShortcut>{cmdKey}+Shift+L</ContextMenuShortcut>
-					</ContextMenuItem>
-				)}
 
 				<ContextMenuItem onSelect={onSelectAll}>
 					<LuMousePointerClick className="size-4" />

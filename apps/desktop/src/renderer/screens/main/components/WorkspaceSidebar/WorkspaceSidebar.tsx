@@ -1,5 +1,7 @@
-import { useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { useWorkspaceShortcuts } from "renderer/hooks/useWorkspaceShortcuts";
+import { useWorkspaceSelectionStore } from "renderer/stores/workspace-selection";
+import { MultiDragPreview } from "./MultiDragPreview";
 import { PortsList } from "./PortsList";
 import { ProjectSection } from "./ProjectSection";
 import { SetupScriptCard } from "./SetupScriptCard";
@@ -19,12 +21,16 @@ export function WorkspaceSidebar({
 	activeProjectName,
 }: WorkspaceSidebarProps) {
 	const { groups } = useWorkspaceShortcuts();
+	const clearSelection = useWorkspaceSelectionStore((s) => s.clearSelection);
 
-	// Calculate shortcut base indices for each project group using cumulative offsets
 	const projectShortcutIndices = useMemo(
 		() =>
 			groups.reduce<{ indices: number[]; cumulative: number }>(
 				(acc, group) => {
+					const sectionWorkspaceCount = (group.sections ?? []).reduce(
+						(sum, s) => sum + s.workspaces.length,
+						0,
+					);
 					const childWorkspaceCount = (
 						group.childProjects ?? []
 					).reduce(
@@ -37,6 +43,7 @@ export function WorkspaceSidebar({
 						cumulative:
 							acc.cumulative +
 							group.workspaces.length +
+							sectionWorkspaceCount +
 							childWorkspaceCount,
 					};
 				},
@@ -45,11 +52,43 @@ export function WorkspaceSidebar({
 		[groups],
 	);
 
+	useEffect(() => {
+		const handleKeyDown = (e: KeyboardEvent) => {
+			if (e.key === "Escape") {
+				if (
+					(e.target as HTMLElement).closest(
+						"input, textarea, [contenteditable]",
+					)
+				)
+					return;
+				clearSelection();
+			}
+		};
+		window.addEventListener("keydown", handleKeyDown);
+		return () => window.removeEventListener("keydown", handleKeyDown);
+	}, [clearSelection]);
+
+	const handleSidebarMouseDown = useCallback(
+		(e: React.MouseEvent) => {
+			if (
+				(e.target as HTMLElement).closest("[role='button'], button, a, input")
+			) {
+				return;
+			}
+			clearSelection();
+		},
+		[clearSelection],
+	);
+
 	return (
 		<SidebarDropZone className="flex flex-col h-full bg-muted/45 dark:bg-muted/35">
 			<WorkspaceSidebarHeader isCollapsed={isCollapsed} />
 
-			<div className="flex-1 overflow-y-auto hide-scrollbar">
+			{/* biome-ignore lint/a11y/noStaticElementInteractions: mousedown on empty sidebar space clears selection */}
+			<div
+				className="flex-1 overflow-y-auto hide-scrollbar"
+				onMouseDown={handleSidebarMouseDown}
+			>
 				{groups.map((group, index) => (
 					<ProjectSection
 						key={group.project.id}
@@ -61,6 +100,8 @@ export function WorkspaceSidebar({
 						hideImage={group.project.hideImage}
 						iconUrl={group.project.iconUrl}
 						workspaces={group.workspaces}
+						sections={group.sections ?? []}
+						topLevelItems={group.topLevelItems}
 						childProjects={group.childProjects}
 						shortcutBaseIndex={projectShortcutIndices[index]}
 						index={index}
@@ -87,6 +128,7 @@ export function WorkspaceSidebar({
 			/>
 
 			<WorkspaceSidebarFooter isCollapsed={isCollapsed} />
+			<MultiDragPreview />
 		</SidebarDropZone>
 	);
 }

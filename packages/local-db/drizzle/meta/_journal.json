@@ -250,8 +250,15 @@
     {
       "idx": 35,
       "version": "6",
+      "when": 1772841491441,
+      "tag": "0035_add_workspace_sections",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
       "when": 1772913373740,
-      "tag": "0035_add_parent_project_id",
+      "tag": "0036_add_parent_project_id",
       "breakpoints": true
     }
   ]
