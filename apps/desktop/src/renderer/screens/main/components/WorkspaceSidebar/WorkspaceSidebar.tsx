@@ -24,10 +24,22 @@ export function WorkspaceSidebar({
 	const projectShortcutIndices = useMemo(
 		() =>
 			groups.reduce<{ indices: number[]; cumulative: number }>(
-				(acc, group) => ({
-					indices: [...acc.indices, acc.cumulative],
-					cumulative: acc.cumulative + group.workspaces.length,
-				}),
+				(acc, group) => {
+					const childWorkspaceCount = (
+						group.childProjects ?? []
+					).reduce(
+						(sum: number, child: { workspaces: unknown[] }) =>
+							sum + child.workspaces.length,
+						0,
+					);
+					return {
+						indices: [...acc.indices, acc.cumulative],
+						cumulative:
+							acc.cumulative +
+							group.workspaces.length +
+							childWorkspaceCount,
+					};
+				},
 				{ indices: [], cumulative: 0 },
 			).indices,
 		[groups],
@@ -49,6 +61,7 @@ export function WorkspaceSidebar({
 						hideImage={group.project.hideImage}
 						iconUrl={group.project.iconUrl}
 						workspaces={group.workspaces}
+						childProjects={group.childProjects}
 						shortcutBaseIndex={projectShortcutIndices[index]}
 						index={index}
 						isCollapsed={isCollapsed}

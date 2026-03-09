@@ -1,12 +1,15 @@
 import { toast } from "@superset/ui/sonner";
 import { cn } from "@superset/ui/utils";
+import { useParams } from "@tanstack/react-router";
 import { AnimatePresence, motion } from "framer-motion";
+import { useMemo } from "react";
 import { useDrag, useDrop } from "react-dnd";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { useReorderProjects } from "renderer/react-query/projects";
 import { useWorkspaceSidebarStore } from "renderer/stores";
 import { useOpenNewWorkspaceModal } from "renderer/stores/new-workspace-modal";
 import { WorkspaceListItem } from "../WorkspaceListItem";
+import { ChildProjectSection } from "./ChildProjectSection";
 import { ProjectHeader } from "./ProjectHeader";
 
 const PROJECT_TYPE = "PROJECT";
@@ -22,6 +25,19 @@ interface Workspace {
 	isUnread: boolean;
 }
 
+interface ChildProjectData {
+	project: {
+		id: string;
+		name: string;
+		color: string;
+		githubOwner: string | null;
+		mainRepoPath: string;
+		hideImage: boolean;
+		iconUrl: string | null;
+	};
+	workspaces: Workspace[];
+}
+
 interface ProjectSectionProps {
 	projectId: string;
 	projectName: string;
@@ -31,6 +47,7 @@ interface ProjectSectionProps {
 	hideImage: boolean;
 	iconUrl: string | null;
 	workspaces: Workspace[];
+	childProjects?: ChildProjectData[];
 	/** Base index for keyboard shortcuts (0-based) */
 	shortcutBaseIndex: number;
 	/** Index for drag-and-drop reordering */
@@ -48,6 +65,7 @@ export function ProjectSection({
 	hideImage,
 	iconUrl,
 	workspaces,
+	childProjects,
 	shortcutBaseIndex,
 	index,
 	isCollapsed: isSidebarCollapsed = false,
@@ -60,9 +78,28 @@ export function ProjectSection({
 
 	const isCollapsed = isProjectCollapsed(projectId);
 
+	const totalWorkspaceCount =
+		workspaces.length +
+		(childProjects ?? []).reduce(
+			(sum, child) => sum + child.workspaces.length,
+			0,
+		);
+
 	const handleNewWorkspace = () => {
 		openModal(projectId);
 	};
+
+	const params = useParams({ strict: false }) as { workspaceId?: string };
+	const activeWorkspaceId = useMemo(() => {
+		if (!params.workspaceId) return null;
+		const allWorkspaces = [
+			...workspaces,
+			...(childProjects ?? []).flatMap((c) => c.workspaces),
+		];
+		return allWorkspaces.some((w) => w.id === params.workspaceId)
+			? params.workspaceId
+			: null;
+	}, [params.workspaceId, workspaces, childProjects]);
 
 	const [{ isDragging }, drag] = useDrag(
 		() => ({
@@ -149,8 +186,9 @@ export function ProjectSection({
 					isCollapsed={isCollapsed}
 					isSidebarCollapsed={isSidebarCollapsed}
 					onToggleCollapse={() => toggleProjectCollapsed(projectId)}
-					workspaceCount={workspaces.length}
+					workspaceCount={totalWorkspaceCount}
 					onNewWorkspace={handleNewWorkspace}
+					activeWorkspaceId={activeWorkspaceId}
 				/>
 				<AnimatePresence initial={false}>
 					{!isCollapsed && (
@@ -207,8 +245,9 @@ export function ProjectSection({
 				isCollapsed={isCollapsed}
 				isSidebarCollapsed={isSidebarCollapsed}
 				onToggleCollapse={() => toggleProjectCollapsed(projectId)}
-				workspaceCount={workspaces.length}
+				workspaceCount={totalWorkspaceCount}
 				onNewWorkspace={handleNewWorkspace}
+				activeWorkspaceId={activeWorkspaceId}
 			/>
 
 			<AnimatePresence initial={false}>
@@ -235,6 +274,37 @@ export function ProjectSection({
 									shortcutIndex={shortcutBaseIndex + wsIndex}
 								/>
 							))}
+							{childProjects?.map((child) => {
+								const childBaseIndex =
+									shortcutBaseIndex +
+									workspaces.length +
+									(childProjects ?? [])
+										.slice(
+											0,
+											childProjects.indexOf(child),
+										)
+										.reduce(
+											(sum, c) =>
+												sum + c.workspaces.length,
+											0,
+										);
+								return (
+									<ChildProjectSection
+										key={child.project.id}
+										projectId={child.project.id}
+										projectName={child.project.name}
+										projectColor={child.project.color}
+										githubOwner={child.project.githubOwner}
+										mainRepoPath={
+											child.project.mainRepoPath
+										}
+										hideImage={child.project.hideImage}
+										iconUrl={child.project.iconUrl}
+										workspaces={child.workspaces}
+										shortcutBaseIndex={childBaseIndex}
+									/>
+								);
+							})}
 						</div>
 					</motion.div>
 				)}

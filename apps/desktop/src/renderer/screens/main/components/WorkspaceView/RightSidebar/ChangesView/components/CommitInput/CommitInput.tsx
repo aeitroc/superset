@@ -35,6 +35,8 @@ interface CommitInputProps {
 	shouldAutoCreatePRAfterPublish: boolean;
 	prUrl?: string;
 	onRefresh: () => void;
+	commitMessage: string;
+	onCommitMessageChange: (message: string) => void;
 }
 
 export function CommitInput({
@@ -48,14 +50,15 @@ export function CommitInput({
 	shouldAutoCreatePRAfterPublish,
 	prUrl,
 	onRefresh,
+	commitMessage,
+	onCommitMessageChange,
 }: CommitInputProps) {
-	const [commitMessage, setCommitMessage] = useState("");
 	const [isOpen, setIsOpen] = useState(false);
 
 	const commitMutation = electronTrpc.changes.commit.useMutation({
 		onSuccess: () => {
 			toast.success("Committed");
-			setCommitMessage("");
+			onCommitMessageChange("");
 			onRefresh();
 		},
 		onError: (error) => toast.error(`Commit failed: ${error.message}`),
@@ -211,7 +214,7 @@ export function CommitInput({
 			<Textarea
 				placeholder="Commit message"
 				value={commitMessage}
-				onChange={(e) => setCommitMessage(e.target.value)}
+				onChange={(e) => onCommitMessageChange(e.target.value)}
 				className="min-h-[52px] resize-none text-[10px] bg-background"
 				onKeyDown={(e) => {
 					if (

@@ -1,16 +1,19 @@
 import { type ReactNode, useEffect, useState } from "react";
+import { env } from "renderer/env.renderer";
 import { authClient, setAuthToken, setJwt } from "renderer/lib/auth-client";
 import { SupersetLogo } from "renderer/routes/sign-in/components/SupersetLogo/SupersetLogo";
 import { electronTrpc } from "../../lib/electron-trpc";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-	const [isHydrated, setIsHydrated] = useState(false);
+	const skipAuth = env.SKIP_ENV_VALIDATION;
+	const [isHydrated, setIsHydrated] = useState(skipAuth);
 	const { refetch: refetchSession } = authClient.useSession();
 
 	const { data: storedToken, isSuccess } =
 		electronTrpc.auth.getStoredToken.useQuery(undefined, {
 			refetchOnWindowFocus: false,
 			refetchOnReconnect: false,
+			enabled: !skipAuth,
 		});
 
 	useEffect(() => {
@@ -56,6 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 	}, [storedToken, isSuccess, isHydrated, refetchSession]);
 
 	electronTrpc.auth.onTokenChanged.useSubscription(undefined, {
+		enabled: !skipAuth,
 		onData: async (data) => {
 			if (data?.token && data?.expiresAt) {
 				setAuthToken(null);
@@ -86,7 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 	});
 
 	useEffect(() => {
-		if (!isHydrated) return;
+		if (!isHydrated || skipAuth) return;
 
 		const refreshJwt = () =>
 			authClient
@@ -103,7 +107,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 		refreshJwt();
 		const interval = setInterval(refreshJwt, 50 * 60 * 1000);
 		return () => clearInterval(interval);
-	}, [isHydrated]);
+	}, [isHydrated, skipAuth]);
 
 	if (!isHydrated) {
 		return (

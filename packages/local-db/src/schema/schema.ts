@@ -1,3 +1,4 @@
+import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { v4 as uuidv4 } from "uuid";
 
@@ -44,10 +45,15 @@ export const projects = sqliteTable(
 		iconUrl: text("icon_url"),
 		neonProjectId: text("neon_project_id"),
 		defaultApp: text("default_app").$type<ExternalApp>(),
+		parentProjectId: text("parent_project_id").references(
+			(): AnySQLiteColumn => projects.id,
+			{ onDelete: "cascade" },
+		),
 	},
 	(table) => [
 		index("projects_main_repo_path_idx").on(table.mainRepoPath),
 		index("projects_last_opened_at_idx").on(table.lastOpenedAt),
+		index("projects_parent_project_id_idx").on(table.parentProjectId),
 	],
 );
 

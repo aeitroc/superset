@@ -1,0 +1,1 @@
+export { WorkspaceTab } from "./WorkspaceTab";

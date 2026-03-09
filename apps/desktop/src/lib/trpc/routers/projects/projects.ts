@@ -1,6 +1,6 @@
 import { existsSync, statSync } from "node:fs";
-import { access, mkdir, rm } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { access, cp, mkdir, readdir, rm } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import {
 	BRANCH_PREFIX_MODES,
 	EXTERNAL_APPS,
@@ -96,7 +96,11 @@ async function initGitRepo(path: string): Promise<{ defaultBranch: string }> {
 	return { defaultBranch };
 }
 
-function upsertProject(mainRepoPath: string, defaultBranch: string): Project {
+function upsertProject(
+	mainRepoPath: string,
+	defaultBranch: string,
+	parentProjectId?: string,
+): Project {
 	const name = basename(mainRepoPath);
 
 	const existing = localDb
@@ -106,12 +110,24 @@ function upsertProject(mainRepoPath: string, defaultBranch: string): Project {
 		.get();
 
 	if (existing) {
+		const updates: Record<string, unknown> = {
+			lastOpenedAt: Date.now(),
+			defaultBranch,
+		};
+		if (parentProjectId !== undefined) {
+			updates.parentProjectId = parentProjectId;
+		}
 		localDb
 			.update(projects)
-			.set({ lastOpenedAt: Date.now(), defaultBranch })
+			.set(updates)
 			.where(eq(projects.id, existing.id))
 			.run();
-		return { ...existing, lastOpenedAt: Date.now(), defaultBranch };
+		return {
+			...existing,
+			lastOpenedAt: Date.now(),
+			defaultBranch,
+			parentProjectId: parentProjectId ?? existing.parentProjectId,
+		};
 	}
 
 	const project = localDb
@@ -121,6 +137,7 @@ function upsertProject(mainRepoPath: string, defaultBranch: string): Project {
 			name,
 			color: getDefaultProjectColor(),
 			defaultBranch,
+			...(parentProjectId ? { parentProjectId, tabOrder: null } : {}),
 		})
 		.returning()
 		.get();
@@ -206,6 +223,110 @@ async function ensureMainWorkspace(project: Project): Promise<void> {
 			auto_created: true,
 		});
 	}
+}
+
+/**
+ * Check if a directory contains any git repos as immediate subdirectories.
+ */
+async function hasInnerGitRepos(dirPath: string): Promise<boolean> {
+	try {
+		const entries = await readdir(dirPath, { withFileTypes: true });
+		return entries.some(
+			(e) => e.isDirectory() && existsSync(join(dirPath, e.name, ".git")),
+		);
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Register a non-git directory as a container project with child git repos.
+ */
+async function openAsContainerProject(dirPath: string): Promise<Project> {
+	const name = basename(dirPath);
+	const existing = localDb
+		.select()
+		.from(projects)
+		.where(eq(projects.mainRepoPath, dirPath))
+		.get();
+
+	let project: Project;
+	if (existing) {
+		localDb
+			.update(projects)
+			.set({ lastOpenedAt: Date.now() })
+			.where(eq(projects.id, existing.id))
+			.run();
+		project = { ...existing, lastOpenedAt: Date.now() };
+	} else {
+		project = localDb
+			.insert(projects)
+			.values({
+				mainRepoPath: dirPath,
+				name,
+				color: getDefaultProjectColor(),
+				defaultBranch: "main",
+			})
+			.returning()
+			.get();
+	}
+
+	activateProject(project);
+
+	// Ensure the parent has a workspace so agents can launch against it
+	const existingWs = getBranchWorkspace(project.id);
+	if (!existingWs) {
+		const ws = localDb
+			.insert(workspaces)
+			.values({
+				projectId: project.id,
+				type: "branch",
+				branch: "main",
+				name: "default",
+				tabOrder: 0,
+			})
+			.onConflictDoNothing()
+			.returning()
+			.all();
+		if (ws.length > 0) {
+			setLastActiveWorkspace(ws[0].id);
+		}
+	} else {
+		touchWorkspace(existingWs.id);
+		setLastActiveWorkspace(existingWs.id);
+	}
+
+	// Register each inner git repo as a child project
+	try {
+		const entries = await readdir(dirPath, { withFileTypes: true });
+		for (const entry of entries) {
+			if (!entry.isDirectory()) continue;
+			const subPath = join(dirPath, entry.name);
+			if (!existsSync(join(subPath, ".git"))) continue;
+
+			try {
+				const subDefaultBranch = await getDefaultBranch(subPath);
+				const childProject = upsertProject(
+					subPath,
+					subDefaultBranch,
+					project.id,
+				);
+				await ensureMainWorkspace(childProject);
+			} catch (err) {
+				console.warn(
+					`[openAsContainerProject] Failed to register child project at ${subPath}:`,
+					err,
+				);
+			}
+		}
+	} catch (err) {
+		console.warn(
+			`[openAsContainerProject] Failed to scan for child repos:`,
+			err,
+		);
+	}
+
+	return project;
 }
 
 // Callers must additionally reject dot-only names (".", "..") to prevent path traversal
@@ -528,7 +649,21 @@ export const createProjectsRouter = (getWindow: () => BrowserWindow | null) => {
 					outcomes.push({ status: "success", project });
 				} catch (gitError) {
 					if (gitError instanceof NotGitRepoError) {
-						outcomes.push({ status: "needsGitInit", selectedPath });
+						// Check if folder contains inner git repos — open as container
+						if (await hasInnerGitRepos(selectedPath)) {
+							const project =
+								await openAsContainerProject(selectedPath);
+							track("project_opened", {
+								project_id: project.id,
+								method: "open",
+							});
+							outcomes.push({ status: "success", project });
+						} else {
+							outcomes.push({
+								status: "needsGitInit",
+								selectedPath,
+							});
+						}
 					} else {
 						const msg =
 							gitError instanceof Error ? gitError.message : String(gitError);
@@ -578,6 +713,16 @@ export const createProjectsRouter = (getWindow: () => BrowserWindow | null) => {
 					mainRepoPath = await getGitRoot(selectedPath);
 				} catch (error) {
 					if (error instanceof NotGitRepoError) {
+						// Check if folder contains inner git repos — open as container
+						if (await hasInnerGitRepos(selectedPath)) {
+							const project =
+								await openAsContainerProject(selectedPath);
+							track("project_opened", {
+								project_id: project.id,
+								method: "drop",
+							});
+							return { canceled: false, project };
+						}
 						return {
 							canceled: false,
 							needsGitInit: true as const,
@@ -836,6 +981,144 @@ export const createProjectsRouter = (getWindow: () => BrowserWindow | null) => {
 				}
 			}),
 
+		createWorkspace: publicProcedure
+			.input(
+				z.object({
+					sourceDir: z.string().min(1),
+					workspaceName: z
+						.string()
+						.min(1)
+						.refine(
+							(val) => SAFE_REPO_NAME_REGEX.test(val) && !/^\.+$/.test(val),
+							{
+								message:
+									"Name can only contain letters, numbers, dots, underscores, hyphens, and spaces",
+							},
+						),
+				}),
+			)
+			.mutation(async ({ input }) => {
+				try {
+					const sourceDir = input.sourceDir;
+
+					// Validate source exists and is a directory
+					if (!existsSync(sourceDir)) {
+						return {
+							canceled: false as const,
+							success: false as const,
+							error: "Source directory does not exist.",
+						};
+					}
+					const stats = statSync(sourceDir);
+					if (!stats.isDirectory()) {
+						return {
+							canceled: false as const,
+							success: false as const,
+							error: "Source path is not a directory.",
+						};
+					}
+
+					const clonePath = join(
+						dirname(sourceDir),
+						input.workspaceName,
+					);
+
+					// Check destination doesn't exist
+					if (existsSync(clonePath)) {
+						return {
+							canceled: false as const,
+							success: false as const,
+							error: `A folder named "${input.workspaceName}" already exists at ${dirname(sourceDir)}.`,
+						};
+					}
+
+					// Copy the entire directory
+					await cp(sourceDir, clonePath, { recursive: true });
+
+					// Find git repos inside the copied directory and fix them up
+					const entries = await readdir(clonePath, {
+						withFileTypes: true,
+					});
+					for (const entry of entries) {
+						if (!entry.isDirectory()) continue;
+						const subPath = join(clonePath, entry.name);
+						// Check if this subdirectory is a git repo
+						if (!existsSync(join(subPath, ".git"))) continue;
+
+						try {
+							const subGit = simpleGit(subPath);
+
+							// Get the original remote URL from the source copy
+							const remotes = await subGit.getRemotes(true);
+							const origin = remotes.find(
+								(r) => r.name === "origin",
+							);
+							const remoteUrl = origin?.refs?.fetch;
+
+							// Derive branch name from git author
+							const authorName =
+								await getGitAuthorName(subPath);
+							const prefix = authorName
+								? sanitizeAuthorPrefix(authorName)
+								: "workspace";
+							const branchName = `${prefix}/${input.workspaceName}`;
+
+							// Create workspace branch if it doesn't exist
+							const branchSummary = await subGit.branch(["-a"]);
+							if (
+								!branchSummary.all.includes(branchName) &&
+								!branchSummary.all.includes(
+									`remotes/origin/${branchName}`,
+								)
+							) {
+								await subGit.checkoutLocalBranch(branchName);
+							}
+
+							// If remote points to a local path (from cp), it's
+							// still the original remote — no fix needed since cp
+							// preserves the .git config as-is
+							// Remote URL is already correct from the source repo
+						} catch (err) {
+							console.warn(
+								`[createWorkspace] Failed to set up git repo at ${subPath}:`,
+								err,
+							);
+						}
+					}
+
+					// Check if the top-level directory itself is a git repo
+					let project: Project;
+					if (existsSync(join(clonePath, ".git"))) {
+						const defaultBranch =
+							await getDefaultBranch(clonePath);
+						project = upsertProject(clonePath, defaultBranch);
+						await ensureMainWorkspace(project);
+					} else {
+						// Not a git repo at top level — register as container project
+						project = await openAsContainerProject(clonePath);
+					}
+
+					track("project_opened", {
+						project_id: project.id,
+						method: "workspace",
+					});
+
+					return {
+						canceled: false as const,
+						success: true as const,
+						project,
+					};
+				} catch (error) {
+					const errorMessage =
+						error instanceof Error ? error.message : String(error);
+					return {
+						canceled: false as const,
+						success: false as const,
+						error: `Failed to create workspace: ${errorMessage}`,
+					};
+				}
+			}),
+
 		update: publicProcedure
 			.input(
 				z.object({
@@ -916,7 +1199,11 @@ export const createProjectsRouter = (getWindow: () => BrowserWindow | null) => {
 					.from(projects)
 					.where(eq(projects.tabOrder, projects.tabOrder)) // Just get all with non-null tabOrder
 					.all()
-					.filter((p) => p.tabOrder !== null)
+					.filter(
+						(p) =>
+							p.tabOrder !== null &&
+							p.parentProjectId === null,
+					)
 					.sort((a, b) => (a.tabOrder ?? 0) - (b.tabOrder ?? 0));
 
 				if (
@@ -1003,10 +1290,22 @@ export const createProjectsRouter = (getWindow: () => BrowserWindow | null) => {
 					throw new Error("Project not found");
 				}
 
+				// Collect this project + any child projects
+				const childProjects = localDb
+					.select()
+					.from(projects)
+					.where(eq(projects.parentProjectId, input.id))
+					.all();
+
+				const allProjectIds = [
+					input.id,
+					...childProjects.map((c) => c.id),
+				];
+
 				const projectWorkspaces = localDb
 					.select()
 					.from(workspaces)
-					.where(eq(workspaces.projectId, input.id))
+					.where(inArray(workspaces.projectId, allProjectIds))
 					.all();
 
 				let totalFailed = 0;
@@ -1023,6 +1322,19 @@ export const createProjectsRouter = (getWindow: () => BrowserWindow | null) => {
 					localDb
 						.delete(workspaces)
 						.where(inArray(workspaces.id, closedWorkspaceIds))
+						.run();
+				}
+
+				// Delete child projects (CASCADE would handle this, but be explicit)
+				if (childProjects.length > 0) {
+					localDb
+						.delete(projects)
+						.where(
+							inArray(
+								projects.id,
+								childProjects.map((c) => c.id),
+							),
+						)
 						.run();
 				}
 

@@ -148,9 +148,10 @@ const config: Configuration = {
 				arch: ["arm64"],
 			},
 		],
-		hardenedRuntime: true,
+		hardenedRuntime: false,
 		gatekeeperAssess: false,
-		notarize: true,
+		notarize: false,
+		identity: null,
 		entitlements: join(pkg.resources, "build/entitlements.mac.plist"),
 		entitlementsInherit: join(
 			pkg.resources,

@@ -549,6 +549,22 @@ export const createCreateProcedures = () => {
 					throw new Error(`Project ${input.projectId} not found`);
 				}
 
+				// If no specific branch requested, check for existing workspace first
+				// (avoids getCurrentBranch call on non-git container projects)
+				if (!input.branch) {
+					const existing = getBranchWorkspace(input.projectId);
+					if (existing) {
+						touchWorkspace(existing.id);
+						setLastActiveWorkspace(existing.id);
+						return {
+							workspace: { ...existing, lastOpenedAt: Date.now() },
+							worktreePath: project.mainRepoPath,
+							projectId: project.id,
+							wasExisting: true,
+						};
+					}
+				}
+
 				const branch =
 					input.branch || (await getCurrentBranch(project.mainRepoPath));
 				if (!branch) {

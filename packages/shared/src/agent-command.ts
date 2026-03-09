@@ -3,7 +3,6 @@ export const AGENT_TYPES = [
 	"codex",
 	"gemini",
 	"opencode",
-	"copilot",
 	"cursor-agent",
 ] as const;
 
@@ -14,7 +13,6 @@ export const AGENT_LABELS: Record<AgentType, string> = {
 	codex: "Codex",
 	gemini: "Gemini",
 	opencode: "OpenCode",
-	copilot: "Copilot",
 	"cursor-agent": "Cursor Agent",
 };
 
@@ -25,7 +23,6 @@ export const AGENT_PRESET_COMMANDS: Record<AgentType, string[]> = {
 	],
 	gemini: ["gemini --yolo"],
 	opencode: ["opencode"],
-	copilot: ["copilot --allow-all"],
 	"cursor-agent": ["cursor-agent"],
 };
 
@@ -34,7 +31,6 @@ export const AGENT_PRESET_DESCRIPTIONS: Record<AgentType, string> = {
 	codex: "Danger mode: All permissions auto-approved",
 	gemini: "Danger mode: All permissions auto-approved",
 	opencode: "OpenCode: Open-source AI coding agent",
-	copilot: "Danger mode: All permissions auto-approved",
 	"cursor-agent": "Cursor AI agent for terminal-based coding assistance",
 };
 
@@ -111,8 +107,6 @@ const AGENT_COMMANDS: Record<
 		buildHeredoc(prompt, delimiter, "gemini --yolo"),
 	opencode: (prompt, delimiter) =>
 		buildHeredoc(prompt, delimiter, "opencode --prompt"),
-	copilot: (prompt, delimiter) =>
-		buildHeredoc(prompt, delimiter, "copilot -i", "--yolo"),
 	"cursor-agent": (prompt, delimiter) =>
 		buildHeredoc(prompt, delimiter, "cursor-agent --yolo"),
 };

@@ -125,7 +125,8 @@ function getTargetIndexForPinnedReorder({
 export function PresetsBar() {
 	const { workspaceId } = useParams({ strict: false });
 	const navigate = useNavigate();
-	const { presets, createPreset, updatePreset, reorderPresets } = usePresets();
+	const { presets: allPresets, createPreset, updatePreset, reorderPresets } = usePresets();
+	const presets = useMemo(() => allPresets.filter((p) => p.name !== "copilot"), [allPresets]);
 	const isDark = useIsDarkTheme();
 	const { openPreset, openPresetInCurrentTerminal } = useTabsWithPresets();
 	const [localPinnedPresetIds, setLocalPinnedPresetIds] = useState<string[]>(

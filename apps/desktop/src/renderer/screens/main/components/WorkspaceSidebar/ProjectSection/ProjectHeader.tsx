@@ -20,9 +20,11 @@ import {
 	LuImageOff,
 	LuPalette,
 	LuPencil,
+	LuPlay,
 	LuSettings,
 	LuX,
 } from "react-icons/lu";
+import { useRunSetupScript } from "renderer/hooks/useRunSetupScript";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { useUpdateProject } from "renderer/react-query/projects/useUpdateProject";
 import { navigateToWorkspace } from "renderer/routes/_authenticated/_dashboard/utils/workspace-navigation";
@@ -51,6 +53,8 @@ interface ProjectHeaderProps {
 	onToggleCollapse: () => void;
 	workspaceCount: number;
 	onNewWorkspace: () => void;
+	/** The active workspace ID if it belongs to this project */
+	activeWorkspaceId?: string | null;
 }
 
 export function ProjectHeader({
@@ -66,12 +70,14 @@ export function ProjectHeader({
 	onToggleCollapse,
 	workspaceCount,
 	onNewWorkspace,
+	activeWorkspaceId,
 }: ProjectHeaderProps) {
 	const utils = electronTrpc.useUtils();
 	const navigate = useNavigate();
 	const params = useParams({ strict: false }) as { workspaceId?: string };
 	const [isCloseDialogOpen, setIsCloseDialogOpen] = useState(false);
 	const rename = useProjectRename(projectId, projectName);
+	const setupScript = useRunSetupScript();
 
 	const closeProject = electronTrpc.projects.close.useMutation({
 		onMutate: async ({ id }) => {
@@ -313,6 +319,32 @@ export function ProjectHeader({
 									({workspaceCount})
 								</span>
 							</button>
+						)}
+
+						{/* Run setup script button */}
+						{activeWorkspaceId && (
+							<Tooltip delayDuration={500}>
+								<TooltipTrigger asChild>
+									<button
+										type="button"
+										disabled={setupScript.isPending}
+										onClick={(e) => {
+											e.stopPropagation();
+											setupScript.run(activeWorkspaceId);
+										}}
+										onContextMenu={(e) => e.stopPropagation()}
+										className="p-1 rounded hover:bg-muted transition-colors shrink-0 ml-1"
+									>
+										<LuPlay
+											className="size-3.5 text-muted-foreground"
+											strokeWidth={STROKE_WIDTH}
+										/>
+									</button>
+								</TooltipTrigger>
+								<TooltipContent side="bottom" sideOffset={4}>
+									Run setup script
+								</TooltipContent>
+							</Tooltip>
 						)}
 
 						{/* Add workspace button */}

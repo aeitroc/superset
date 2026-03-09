@@ -1,6 +1,6 @@
 import { projects, workspaces, worktrees } from "@superset/local-db";
 import { TRPCError } from "@trpc/server";
-import { eq, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { localDb } from "main/lib/local-db";
 import { z } from "zod";
 import { publicProcedure, router } from "../../..";
@@ -14,9 +14,17 @@ function getWorkspacesInVisualOrder(): string[] {
 	const activeProjects = localDb
 		.select()
 		.from(projects)
-		.where(isNotNull(projects.tabOrder))
+		.where(
+			and(isNotNull(projects.tabOrder), isNull(projects.parentProjectId)),
+		)
 		.all()
 		.sort((a, b) => (a.tabOrder ?? 0) - (b.tabOrder ?? 0));
+
+	const childProjects = localDb
+		.select()
+		.from(projects)
+		.where(isNotNull(projects.parentProjectId))
+		.all();
 
 	const allWorkspaces = localDb
 		.select()
@@ -26,11 +34,25 @@ function getWorkspacesInVisualOrder(): string[] {
 
 	const orderedIds: string[] = [];
 	for (const project of activeProjects) {
+		// Parent's own workspaces
 		const projectWorkspaces = allWorkspaces
 			.filter((w) => w.projectId === project.id)
 			.sort((a, b) => a.tabOrder - b.tabOrder);
 		for (const ws of projectWorkspaces) {
 			orderedIds.push(ws.id);
+		}
+
+		// Child project workspaces
+		const children = childProjects.filter(
+			(c) => c.parentProjectId === project.id,
+		);
+		for (const child of children) {
+			const childWorkspaces = allWorkspaces
+				.filter((w) => w.projectId === child.id)
+				.sort((a, b) => a.tabOrder - b.tabOrder);
+			for (const ws of childWorkspaces) {
+				orderedIds.push(ws.id);
+			}
 		}
 	}
 
@@ -96,16 +118,58 @@ export const createQueryProcedures = () => {
 		}),
 
 		getAllGrouped: publicProcedure.query(() => {
+			// Top-level active projects only (exclude children)
 			const activeProjects = localDb
 				.select()
 				.from(projects)
-				.where(isNotNull(projects.tabOrder))
+				.where(
+					and(
+						isNotNull(projects.tabOrder),
+						isNull(projects.parentProjectId),
+					),
+				)
+				.all();
+
+			// Child projects (regardless of tabOrder)
+			const childProjectRows = localDb
+				.select()
+				.from(projects)
+				.where(isNotNull(projects.parentProjectId))
 				.all();
 
 			const allWorktrees = localDb.select().from(worktrees).all();
 			const worktreePathMap: WorktreePathMap = new Map(
 				allWorktrees.map((wt) => [wt.id, wt.path]),
 			);
+
+			type WorkspaceEntry = {
+				id: string;
+				projectId: string;
+				worktreeId: string | null;
+				worktreePath: string;
+				type: "worktree" | "branch";
+				branch: string;
+				name: string;
+				tabOrder: number;
+				createdAt: number;
+				updatedAt: number;
+				lastOpenedAt: number;
+				isUnread: boolean;
+				isUnnamed: boolean;
+			};
+
+			type ChildProject = {
+				project: {
+					id: string;
+					name: string;
+					color: string;
+					githubOwner: string | null;
+					mainRepoPath: string;
+					hideImage: boolean;
+					iconUrl: string | null;
+				};
+				workspaces: WorkspaceEntry[];
+			};
 
 			const groupsMap = new Map<
 				string,
@@ -120,21 +184,8 @@ export const createQueryProcedures = () => {
 						hideImage: boolean;
 						iconUrl: string | null;
 					};
-					workspaces: Array<{
-						id: string;
-						projectId: string;
-						worktreeId: string | null;
-						worktreePath: string;
-						type: "worktree" | "branch";
-						branch: string;
-						name: string;
-						tabOrder: number;
-						createdAt: number;
-						updatedAt: number;
-						lastOpenedAt: number;
-						isUnread: boolean;
-						isUnnamed: boolean;
-					}>;
+					workspaces: WorkspaceEntry[];
+					childProjects: ChildProject[];
 				}
 			>();
 
@@ -152,7 +203,37 @@ export const createQueryProcedures = () => {
 						iconUrl: project.iconUrl ?? null,
 					},
 					workspaces: [],
+					childProjects: [],
 				});
+			}
+
+			// Build child project entries grouped by parent
+			const childProjectMap = new Map<string, ChildProject[]>();
+			for (const child of childProjectRows) {
+				const parentId = child.parentProjectId!;
+				if (!childProjectMap.has(parentId)) {
+					childProjectMap.set(parentId, []);
+				}
+				childProjectMap.get(parentId)!.push({
+					project: {
+						id: child.id,
+						name: child.name,
+						color: child.color,
+						githubOwner: child.githubOwner ?? null,
+						mainRepoPath: child.mainRepoPath,
+						hideImage: child.hideImage ?? false,
+						iconUrl: child.iconUrl ?? null,
+					},
+					workspaces: [],
+				});
+			}
+
+			// Attach children to parent groups
+			for (const [parentId, children] of childProjectMap) {
+				const group = groupsMap.get(parentId);
+				if (group) {
+					group.childProjects = children;
+				}
 			}
 
 			const allWorkspaces = localDb
@@ -162,24 +243,38 @@ export const createQueryProcedures = () => {
 				.all()
 				.sort((a, b) => a.tabOrder - b.tabOrder);
 
-			for (const workspace of allWorkspaces) {
-				const group = groupsMap.get(workspace.projectId);
-				if (group) {
-					let worktreePath = "";
-					if (workspace.type === "worktree" && workspace.worktreeId) {
-						worktreePath = worktreePathMap.get(workspace.worktreeId) ?? "";
-					} else if (workspace.type === "branch") {
-						worktreePath = group.project.mainRepoPath;
-					}
-
-					group.workspaces.push({
-						...workspace,
-						type: workspace.type as "worktree" | "branch",
-						worktreePath,
-						isUnread: workspace.isUnread ?? false,
-						isUnnamed: workspace.isUnnamed ?? false,
-					});
+			// Build a lookup for child project entries by project ID
+			const childProjectById = new Map<string, ChildProject>();
+			for (const children of childProjectMap.values()) {
+				for (const child of children) {
+					childProjectById.set(child.project.id, child);
 				}
+			}
+
+			for (const workspace of allWorkspaces) {
+				// Try parent group first
+				const group = groupsMap.get(workspace.projectId);
+				// Then try child project
+				const childProject = childProjectById.get(workspace.projectId);
+
+				const targetProject = group || childProject;
+				if (!targetProject) continue;
+
+				let worktreePath = "";
+				if (workspace.type === "worktree" && workspace.worktreeId) {
+					worktreePath =
+						worktreePathMap.get(workspace.worktreeId) ?? "";
+				} else if (workspace.type === "branch") {
+					worktreePath = targetProject.project.mainRepoPath;
+				}
+
+				targetProject.workspaces.push({
+					...workspace,
+					type: workspace.type as "worktree" | "branch",
+					worktreePath,
+					isUnread: workspace.isUnread ?? false,
+					isUnnamed: workspace.isUnnamed ?? false,
+				});
 			}
 
 			return Array.from(groupsMap.values()).sort(

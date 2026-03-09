@@ -6,6 +6,7 @@ import { HiArrowLeft } from "react-icons/hi2";
 import {
 	LuFolderPlus,
 	LuGitBranch,
+	LuGitFork,
 	LuLayoutTemplate,
 	LuX,
 } from "react-icons/lu";
@@ -14,12 +15,24 @@ import { CloneRepoTab } from "./components/CloneRepoTab";
 import { EmptyRepoTab } from "./components/EmptyRepoTab";
 import { PathSelector } from "./components/PathSelector";
 import { TemplateTab } from "./components/TemplateTab";
-import type { NewProjectMode } from "./constants";
+import { WorkspaceTab } from "./components/WorkspaceTab";
+import { NEW_PROJECT_MODES, type NewProjectMode } from "./constants";
+
+type NewProjectSearch = {
+	mode?: NewProjectMode;
+};
 
 export const Route = createFileRoute(
 	"/_authenticated/_onboarding/new-project/",
 )({
 	component: NewProjectPage,
+	validateSearch: (search: Record<string, unknown>): NewProjectSearch => ({
+		mode:
+			typeof search.mode === "string" &&
+			(NEW_PROJECT_MODES as readonly string[]).includes(search.mode)
+				? (search.mode as NewProjectMode)
+				: undefined,
+	}),
 });
 
 const OPTIONS: {
@@ -46,10 +59,17 @@ const OPTIONS: {
 		description: "Start from a project template",
 		icon: LuLayoutTemplate,
 	},
+	{
+		mode: "workspace",
+		label: "Workspace",
+		description: "Clone a local project to a new folder",
+		icon: LuGitFork,
+	},
 ];
 
 function NewProjectPage() {
-	const [mode, setMode] = useState<NewProjectMode>("empty");
+	const { mode: searchMode } = Route.useSearch();
+	const [mode, setMode] = useState<NewProjectMode>(searchMode || "empty");
 	const [error, setError] = useState<string | null>(null);
 	const [parentDir, setParentDir] = useState("");
 
@@ -76,9 +96,11 @@ function NewProjectPage() {
 					<div className="w-full flex flex-col gap-5">
 						<h1 className="text-lg font-medium text-foreground">New Project</h1>
 
-						<PathSelector value={parentDir} onChange={setParentDir} />
+						{mode !== "workspace" && (
+							<PathSelector value={parentDir} onChange={setParentDir} />
+						)}
 
-						<div className="grid grid-cols-3 gap-3">
+						<div className="grid grid-cols-4 gap-3">
 							{OPTIONS.map((option) => {
 								const selected = mode === option.mode;
 								return (
@@ -123,6 +145,9 @@ function NewProjectPage() {
 						)}
 						{mode === "template" && (
 							<TemplateTab onError={setError} parentDir={parentDir} />
+						)}
+						{mode === "workspace" && (
+							<WorkspaceTab onError={setError} />
 						)}
 
 						{error && (

@@ -15,8 +15,11 @@ export function useWorkspaceShortcuts() {
 		electronTrpc.workspaces.getAllGrouped.useQuery();
 	const navigate = useNavigate();
 
-	// Flatten workspaces for keyboard navigation
-	const allWorkspaces = groups.flatMap((group) => group.workspaces);
+	// Flatten workspaces for keyboard navigation (including child project workspaces)
+	const allWorkspaces = groups.flatMap((group) => [
+		...group.workspaces,
+		...(group.childProjects ?? []).flatMap((child) => child.workspaces),
+	]);
 
 	const switchToWorkspace = useCallback(
 		(index: number) => {

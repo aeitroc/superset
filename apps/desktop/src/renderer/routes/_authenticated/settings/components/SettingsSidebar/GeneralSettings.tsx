@@ -54,12 +54,6 @@ const SECTION_GROUPS: SectionGroup[] = [
 		label: "Personal",
 		items: [
 			{
-				id: "/settings/account",
-				section: "account",
-				label: "Account",
-				icon: <HiOutlineUser className="h-4 w-4" />,
-			},
-			{
 				id: "/settings/appearance",
 				section: "appearance",
 				label: "Appearance",
@@ -99,41 +93,6 @@ const SECTION_GROUPS: SectionGroup[] = [
 				section: "terminal",
 				label: "Terminal",
 				icon: <HiOutlineCommandLine className="h-4 w-4" />,
-			},
-		],
-	},
-	{
-		label: "Organization",
-		items: [
-			{
-				id: "/settings/organization",
-				section: "organization",
-				label: "Organization",
-				icon: <HiOutlineBuildingOffice2 className="h-4 w-4" />,
-			},
-			{
-				id: "/settings/integrations",
-				section: "integrations",
-				label: "Integrations",
-				icon: <HiOutlinePuzzlePiece className="h-4 w-4" />,
-			},
-			{
-				id: "/settings/billing",
-				section: "billing",
-				label: "Billing",
-				icon: <HiOutlineCreditCard className="h-4 w-4" />,
-			},
-			{
-				id: "/settings/devices",
-				section: "devices",
-				label: "Devices",
-				icon: <HiOutlineDevicePhoneMobile className="h-4 w-4" />,
-			},
-			{
-				id: "/settings/api-keys",
-				section: "apikeys",
-				label: "API Keys",
-				icon: <HiOutlineKey className="h-4 w-4" />,
 			},
 		],
 	},

@@ -1,15 +1,15 @@
-import { useParams } from "@tanstack/react-router";
-import { HiOutlineWifi } from "react-icons/hi2";
+import { useNavigate, useParams } from "@tanstack/react-router";
+import { HiOutlineCog6Tooth, HiOutlineWifi } from "react-icons/hi2";
 import { useOnlineStatus } from "renderer/hooks/useOnlineStatus";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { NavigationControls } from "./components/NavigationControls";
 import { OpenInMenuButton } from "./components/OpenInMenuButton";
-import { OrganizationDropdown } from "./components/OrganizationDropdown";
 import { ResourceConsumption } from "./components/ResourceConsumption";
 import { SidebarToggle } from "./components/SidebarToggle";
 import { WindowControls } from "./components/WindowControls";
 
 export function TopBar() {
+	const navigate = useNavigate();
 	const { data: platform } = electronTrpc.window.getPlatform.useQuery();
 	const { workspaceId } = useParams({ strict: false });
 	const { data: workspace } = electronTrpc.workspaces.get.useQuery(
@@ -57,7 +57,15 @@ export function TopBar() {
 						projectId={workspace.project?.id}
 					/>
 				)}
-				<OrganizationDropdown />
+				<button
+					type="button"
+					className="no-drag flex items-center gap-1.5 h-6 px-1.5 rounded border border-border/60 bg-secondary/50 hover:bg-secondary hover:border-border transition-all duration-150 ease-out focus:outline-none focus:ring-1 focus:ring-ring"
+					aria-label="Settings"
+					onClick={() => navigate({ to: "/settings/appearance" })}
+				>
+					<HiOutlineCog6Tooth className="h-3.5 w-3.5 text-muted-foreground" />
+					<span className="text-xs font-medium">Settings</span>
+				</button>
 				{!isMac && <WindowControls />}
 			</div>
 		</div>

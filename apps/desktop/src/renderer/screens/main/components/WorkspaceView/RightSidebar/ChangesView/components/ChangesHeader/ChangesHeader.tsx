@@ -17,7 +17,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@superset/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@superset/ui/tooltip";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { HiArrowPath, HiCheck } from "react-icons/hi2";
+import { HiArrowPath, HiCheck, HiOutlineSparkles } from "react-icons/hi2";
 import { LuGitBranch } from "react-icons/lu";
 import { VscGitStash, VscGitStashApply } from "react-icons/vsc";
 import { electronTrpc } from "renderer/lib/electron-trpc";
@@ -38,6 +38,8 @@ interface ChangesHeaderProps {
 	onStashIncludeUntracked: () => void;
 	onStashPop: () => void;
 	isStashPending: boolean;
+	onGenerateCommitMessage: () => void;
+	isGeneratingCommitMessage: boolean;
 }
 
 function BaseBranchSelector({ worktreePath }: { worktreePath: string }) {
@@ -228,6 +230,35 @@ function RefreshButton({ onRefresh }: { onRefresh: () => void }) {
 	);
 }
 
+function GenerateCommitMessageButton({
+	onGenerate,
+	isGenerating,
+}: {
+	onGenerate: () => void;
+	isGenerating: boolean;
+}) {
+	return (
+		<Tooltip>
+			<TooltipTrigger asChild>
+				<Button
+					variant="ghost"
+					size="icon"
+					onClick={onGenerate}
+					disabled={isGenerating}
+					className="size-6 p-0"
+				>
+					<HiOutlineSparkles
+						className={`size-3.5 ${isGenerating ? "animate-pulse" : ""}`}
+					/>
+				</Button>
+			</TooltipTrigger>
+			<TooltipContent side="top" showArrow={false}>
+				Generate commit message
+			</TooltipContent>
+		</Tooltip>
+	);
+}
+
 export function ChangesHeader({
 	onRefresh,
 	viewMode,
@@ -241,6 +272,8 @@ export function ChangesHeader({
 	onStashIncludeUntracked,
 	onStashPop,
 	isStashPending,
+	onGenerateCommitMessage,
+	isGeneratingCommitMessage,
 }: ChangesHeaderProps) {
 	return (
 		<div className="flex items-center gap-0.5 px-2 py-1.5">
@@ -253,6 +286,10 @@ export function ChangesHeader({
 			/>
 			<ViewModeToggle viewMode={viewMode} onViewModeChange={onViewModeChange} />
 			<RefreshButton onRefresh={onRefresh} />
+			<GenerateCommitMessageButton
+				onGenerate={onGenerateCommitMessage}
+				isGenerating={isGeneratingCommitMessage}
+			/>
 			<PRButton
 				pr={pr}
 				isLoading={isPRStatusLoading}

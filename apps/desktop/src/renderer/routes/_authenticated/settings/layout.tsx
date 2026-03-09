@@ -19,18 +19,12 @@ export const Route = createFileRoute("/_authenticated/settings")({
 
 // Order of sections for auto-navigation
 const SECTION_ORDER: SettingsSection[] = [
-	"account",
 	"appearance",
 	"ringtones",
 	"keyboard",
 	"behavior",
 	"git",
 	"terminal",
-	"organization",
-	"integrations",
-	"billing",
-	"devices",
-	"apikeys",
 	"permissions",
 ];
 
@@ -54,9 +48,9 @@ function getSectionFromPath(pathname: string): SettingsSection | null {
 function getPathFromSection(section: SettingsSection): string {
 	switch (section) {
 		case "account":
-			return "/settings/account";
+			return "/settings/appearance";
 		case "organization":
-			return "/settings/organization";
+			return "/settings/appearance";
 		case "appearance":
 			return "/settings/appearance";
 		case "ringtones":

@@ -213,6 +213,24 @@ export function ChangesView({
 		},
 	});
 
+	const [commitMessage, setCommitMessage] = useState("");
+
+	const generateCommitMessageMutation =
+		electronTrpc.changes.generateCommitMessage.useMutation({
+			onSuccess: (data) => {
+				setCommitMessage(data.message);
+			},
+			onError: (error) => {
+				console.error("Failed to generate commit message:", error);
+				toast.error(`Failed to generate commit message: ${error.message}`);
+			},
+		});
+
+	const handleGenerateCommitMessage = () => {
+		if (!worktreePath) return;
+		generateCommitMessageMutation.mutate({ worktreePath });
+	};
+
 	const [showDiscardUnstagedDialog, setShowDiscardUnstagedDialog] =
 		useState(false);
 	const [showDiscardStagedDialog, setShowDiscardStagedDialog] = useState(false);
@@ -477,6 +495,8 @@ export function ChangesView({
 					stashIncludeUntrackedMutation.isPending ||
 					stashPopMutation.isPending
 				}
+				onGenerateCommitMessage={handleGenerateCommitMessage}
+				isGeneratingCommitMessage={generateCommitMessageMutation.isPending}
 			/>
 
 			<CommitInput
@@ -490,6 +510,8 @@ export function ChangesView({
 				shouldAutoCreatePRAfterPublish={shouldAutoCreatePR}
 				prUrl={prUrl}
 				onRefresh={handleRefresh}
+				commitMessage={commitMessage}
+				onCommitMessageChange={setCommitMessage}
 			/>
 
 			{!hasChanges ? (

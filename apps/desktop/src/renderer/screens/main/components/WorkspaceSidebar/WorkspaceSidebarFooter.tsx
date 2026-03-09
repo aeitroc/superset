@@ -8,7 +8,12 @@ import {
 import { toast } from "@superset/ui/sonner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@superset/ui/tooltip";
 import { useNavigate } from "@tanstack/react-router";
-import { LuFolderGit, LuFolderOpen, LuFolderPlus } from "react-icons/lu";
+import {
+	LuFolderGit,
+	LuFolderOpen,
+	LuFolderPlus,
+	LuGitFork,
+} from "react-icons/lu";
 import { useOpenProject } from "renderer/react-query/projects";
 import { useCreateBranchWorkspace } from "renderer/react-query/workspaces";
 import { STROKE_WIDTH } from "./constants";
@@ -78,6 +83,17 @@ export function WorkspaceSidebarFooter({
 							<LuFolderGit className="size-4" strokeWidth={STROKE_WIDTH} />
 							New project
 						</DropdownMenuItem>
+						<DropdownMenuItem
+							onClick={() =>
+								navigate({
+									to: "/new-project",
+									search: { mode: "workspace" },
+								})
+							}
+						>
+							<LuGitFork className="size-4" strokeWidth={STROKE_WIDTH} />
+							New workspace
+						</DropdownMenuItem>
 					</DropdownMenuContent>
 				</DropdownMenu>
 			</div>
@@ -106,6 +122,17 @@ export function WorkspaceSidebarFooter({
 					<DropdownMenuItem onClick={() => navigate({ to: "/new-project" })}>
 						<LuFolderGit className="size-4" strokeWidth={STROKE_WIDTH} />
 						New project
+					</DropdownMenuItem>
+					<DropdownMenuItem
+						onClick={() =>
+							navigate({
+								to: "/new-project",
+								search: { mode: "workspace" },
+							})
+						}
+					>
+						<LuGitFork className="size-4" strokeWidth={STROKE_WIDTH} />
+						New workspace
 					</DropdownMenuItem>
 				</DropdownMenuContent>
 			</DropdownMenu>

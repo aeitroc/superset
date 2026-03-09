@@ -336,10 +336,68 @@ async function getGitWithShellPath(worktreePath: string) {
 	return git;
 }
 
+const COMMIT_MESSAGE_PROMPT = `Generate a concise conventional git commit message for these changes.
+Rules:
+- First line: type(scope): description (max 72 chars). Types: feat, fix, chore, refactor, docs, style, test.
+- If multiple logical changes, use a multi-line message: first line summary, blank line, then bullet points.
+- Focus on WHAT and WHY, not HOW.
+- Reply with ONLY the commit message. No explanation, no markdown fences.`;
+
+const MAX_DIFF_LENGTH = 4000;
+
+async function generateCommitMessageFromDiff(
+	diff: string,
+	worktreePath: string,
+): Promise<string | null> {
+	const truncatedDiff =
+		diff.length > MAX_DIFF_LENGTH
+			? `${diff.slice(0, MAX_DIFF_LENGTH)}\n\n... (diff truncated, ${diff.length - MAX_DIFF_LENGTH} chars omitted)`
+			: diff;
+
+	const prompt = `${COMMIT_MESSAGE_PROMPT}\n\nDiff:\n${truncatedDiff}`;
+
+	try {
+		const { stdout } = await execWithShellEnv("claude", ["-p", prompt], {
+			cwd: worktreePath,
+		});
+
+		const msg = stdout.trim();
+		if (msg && msg.length < 500 && !msg.startsWith("```")) {
+			return msg;
+		}
+	} catch (error) {
+		console.error("[git/generateCommitMessage] claude -p failed:", error);
+	}
+
+	return null;
+}
+
 export const createGitOperationsRouter = () => {
 	return router({
 		// NOTE: saveFile is defined in file-contents.ts with hardened path validation
 		// Do NOT add saveFile here - it would overwrite the secure version
+
+		generateCommitMessage: publicProcedure
+			.input(z.object({ worktreePath: z.string() }))
+			.mutation(async ({ input }): Promise<{ message: string }> => {
+				assertRegisteredWorktree(input.worktreePath);
+
+				const git = await getGitWithShellPath(input.worktreePath);
+				const diff = await git.diff(["--staged"]);
+
+				if (!diff.trim()) {
+					return { message: "chore: update files" };
+				}
+
+				const generated = await generateCommitMessageFromDiff(diff, input.worktreePath);
+				if (generated) {
+					return { message: generated };
+				}
+
+				const stat = await git.diff(["--staged", "--stat"]);
+				const lastLine = stat.trim().split("\n").pop() ?? "";
+				return { message: `chore: update files (${lastLine})` };
+			}),
 
 		commit: publicProcedure
 			.input(
